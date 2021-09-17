@@ -5,10 +5,35 @@ import { exists } from "https://deno.land/std@0.107.0/fs/mod.ts";
 
 export class Process {
   private statCache = new Map<string, Deno.FileInfo | null>();
+  private prettyFmt = "format:%H\t%at\t%an\t%C(reset)%C(auto)%d%C(reset)\t%s";
+  private subVineDepth = 2;
 
   async run(): Promise<void> {
     console.log(await this.refs());
     console.log(await this.status());
+
+    for await (
+      const line of this.getLineBlock(
+        this.gitOpen(
+          "log",
+          "--date-order",
+          `--pretty=format:<%H><%h><%P>${this.prettyFmt}`,
+        ),
+        this.subVineDepth,
+      )
+    ) {
+      //
+    }
+  }
+
+  private async *getLineBlock(
+    fh: Deno.Reader,
+    max: number,
+  ): AsyncGenerator<string> {
+    for await (const line of readLines(fh)) {
+      console.log(max);
+      yield line;
+    }
   }
 
   private async status(): Promise<string> {
