@@ -1,5 +1,6 @@
 import { join, normalize } from "https://deno.land/std@0.107.0/path/mod.ts";
 import { readAll } from "https://deno.land/std@0.107.0/io/util.ts";
+import { readLines } from "https://deno.land/std@0.107.0/io/mod.ts";
 import { exists } from "https://deno.land/std@0.107.0/fs/mod.ts";
 
 export class Process {
@@ -10,27 +11,25 @@ export class Process {
 
   private async refs(): Promise<Map<string, string[]>> {
     const refs = new Map<string, string[]>();
-    for (const ref of (await this.git("show-ref")).split(/\n/)) {
-      if (ref.length === 0) {
+    for await (const line of readLines(this.gitOpen("show-ref"))) {
+      const m = line.match(/^(\S+)\s+(.*)$/);
+      if (!m) {
         continue;
       }
-      const m = ref.match(/^(\S+)\s+(.*)$/);
-      if (m) {
-        const [_, sha, name] = m;
-        const names = refs.get(sha) || [];
-        names.push(name);
-        refs.set(sha, names);
-        if (/^refs\/tags\//.test(name)) {
-          const subSha = await this.git(
-            "log",
-            "-1",
-            "--pretty=format:%H",
-            name,
-          );
-          const subNames = refs.get(subSha) || [];
-          subNames.push(name);
-          refs.set(subSha, subNames);
-        }
+      const [_, sha, name] = m;
+      const names = refs.get(sha) || [];
+      names.push(name);
+      refs.set(sha, names);
+      if (/^refs\/tags\//.test(name)) {
+        const subSha = await this.git(
+          "log",
+          "-1",
+          "--pretty=format:%H",
+          name,
+        );
+        const subNames = refs.get(subSha) || [];
+        subNames.push(name);
+        refs.set(subSha, subNames);
       }
     }
     return refs;
@@ -47,8 +46,8 @@ export class Process {
       return dotGit;
     } else if (st.isFile) {
       const fh = await Deno.open(dotGit);
-      const line = (new TextDecoder().decode(await readAll(fh))).split(/\n/)[0];
-      const m = line.match(/^gitdir:\s+(.*)/);
+      const line = new TextDecoder().decode(await readAll(fh));
+      const m = line.match(/^gitdir:\s+([^\n]+)/);
       if (!m) {
         throw new Error(`invalid .git file: ${dotGit}`);
       }
@@ -58,9 +57,13 @@ export class Process {
   }
 
   private async git(...args: string[]): Promise<string> {
-    const p = Deno.run({ cmd: ["git", ...args], stdout: "piped" });
-    await p.status();
-    const out = new TextDecoder().decode(await p.output());
+    const stdout = this.gitOpen(...args);
+    const output = await readAll(this.gitOpen(...args));
+    const out = new TextDecoder().decode(output);
     return out.replace(/\n$/, "");
+  }
+
+  private gitOpen(...args: string[]): Deno.Reader & Deno.Closer {
+    return Deno.run({ cmd: ["git", ...args], stdout: "piped" }).stdout;
   }
 }
