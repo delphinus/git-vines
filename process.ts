@@ -1,9 +1,14 @@
+import { join, normalize } from "https://deno.land/std@0.107.0/path/mod.ts";
+import { readAll } from "https://deno.land/std@0.107.0/io/util.ts";
+import { exists } from "https://deno.land/std@0.107.0/fs/mod.ts";
+
 export class Process {
   async run(): Promise<void> {
-    console.log(await this.getRefs());
+    console.log(await this.refs());
+    console.log(await this.repoPath());
   }
 
-  private async getRefs(): Promise<Map<string, string[]>> {
+  private async refs(): Promise<Map<string, string[]>> {
     const refs = new Map<string, string[]>();
     for (const ref of await this.git("show-ref")) {
       if (ref.length === 0) {
@@ -27,8 +32,29 @@ export class Process {
     return refs;
   }
 
-  private async git(...cmd: string[]): Promise<string[]> {
-    const p = Deno.run({ cmd: ["git", "show-ref"], stdout: "piped" });
+  private async repoPath(): Promise<string> {
+    const top = (await this.git("rev-parse", "--show-toplevel"))[0];
+    const dotGit = join(top, ".git");
+    if (!(await exists(dotGit))) {
+      throw new Error(`.git not found: ${dotGit}`);
+    }
+    const st = await Deno.stat(dotGit);
+    if (st.isDirectory) {
+      return dotGit;
+    } else if (st.isFile) {
+      const fh = await Deno.open(dotGit);
+      const line = (new TextDecoder().decode(await readAll(fh))).split(/\n/)[0];
+      const m = line.match(/^gitdir:\s+(.*)/);
+      if (!m) {
+        throw new Error(`invalid .git file: ${dotGit}`);
+      }
+      return normalize(join(dotGit, m[1]));
+    }
+    throw new Error("cannot detect repo_path");
+  }
+
+  private async git(...args: string[]): Promise<string[]> {
+    const p = Deno.run({ cmd: ["git", ...args], stdout: "piped" });
     await p.status();
     return new TextDecoder().decode(await p.output()).split(/\n/);
   }
