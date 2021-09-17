@@ -1,3 +1,7 @@
-#!/usr/bin/env -S deno run
+#!/usr/bin/env -S deno run --allow-run
+//import { main } from "https://raw.githubusercontent.com/delphinus/git-vines/feature/first-implementation/main.ts";
+import { main } from "./main.ts";
+
+main();
 
 // vim:se ft=javascript:
