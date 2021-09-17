@@ -10,7 +10,7 @@ export class Process {
 
   private async refs(): Promise<Map<string, string[]>> {
     const refs = new Map<string, string[]>();
-    for (const ref of await this.git("show-ref")) {
+    for (const ref of (await this.git("show-ref")).split(/\n/)) {
       if (ref.length === 0) {
         continue;
       }
@@ -21,8 +21,12 @@ export class Process {
         names.push(name);
         refs.set(sha, names);
         if (/^refs\/tags\//.test(name)) {
-          const subSha =
-            (await this.git("log", "-1", "--pretty=format:%H", name))[0];
+          const subSha = await this.git(
+            "log",
+            "-1",
+            "--pretty=format:%H",
+            name,
+          );
           const subNames = refs.get(subSha) || [];
           subNames.push(name);
           refs.set(subSha, subNames);
@@ -33,7 +37,7 @@ export class Process {
   }
 
   private async repoPath(): Promise<string> {
-    const top = (await this.git("rev-parse", "--show-toplevel"))[0];
+    const top = await this.git("rev-parse", "--show-toplevel");
     const dotGit = join(top, ".git");
     if (!(await exists(dotGit))) {
       throw new Error(`.git not found: ${dotGit}`);
@@ -53,9 +57,10 @@ export class Process {
     throw new Error("cannot detect repo_path");
   }
 
-  private async git(...args: string[]): Promise<string[]> {
+  private async git(...args: string[]): Promise<string> {
     const p = Deno.run({ cmd: ["git", ...args], stdout: "piped" });
     await p.status();
-    return new TextDecoder().decode(await p.output()).split(/\n/);
+    const out = new TextDecoder().decode(await p.output());
+    return out.replace(/\n$/, "");
   }
 }
