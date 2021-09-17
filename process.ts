@@ -7,6 +7,14 @@ export class Process {
   async run(): Promise<void> {
     console.log(await this.refs());
     console.log(await this.repoPath());
+    const hasChangeUnstaged =
+      (await this.git("diff", "--shortstat")).length > 0;
+    const hasCHangeStaged =
+      (await this.git("diff", "--shortstat", "--cached")).length > 0;
+    const hasStash = (await this.git("stash", "list")).length > 0;
+    const hasUntracked =
+      (await this.git("ls-files", "--others", "--exclude-standard")).length > 0;
+    console.log({ hasChangeUnstaged, hasCHangeStaged, hasStash, hasUntracked });
   }
 
   private async refs(): Promise<Map<string, string[]>> {
