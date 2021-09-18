@@ -37,50 +37,60 @@ export class Process {
   }
 
   private async status(): Promise<string> {
-    const dirtyChars: string[] = [];
-    const hasChangeUnstaged =
-      (await this.git("diff", "--shortstat")).length > 0;
-    if (hasChangeUnstaged) {
-      dirtyChars.push("*");
+    const results: string[] = [];
+    for await (const result of [this.dirty(), this.midFlow()]) {
+      results.push(result);
     }
-    const hasChangeStaged =
-      (await this.git("diff", "--shortstat", "--cached")).length > 0;
-    if (hasChangeStaged) {
-      dirtyChars.push("+");
+    return results.join(" ");
+  }
+  private async dirty(): Promise<string> {
+    const dirty: string[] = [];
+    for await (
+      const result of [
+        // hasChangeUnstaged
+        { cmd: ["diff", "--shortstat"], char: "*" },
+        // hasChangeStaged
+        { cmd: ["diff", "--shortstat", "--cached"], char: "+" },
+        // hasStash
+        { cmd: ["stash", "list"], char: "$" },
+        // hasUntracked
+        { cmd: ["ls-files", "--others", "--exclude-standard"], char: "%" },
+      ].map((c) => this.git(...c.cmd).then((v) => v.length > 0 ? c.char : ""))
+    ) {
+      dirty.push(result);
     }
-    const hasStash = (await this.git("stash", "list")).length > 0;
-    if (hasStash) {
-      dirtyChars.push("$");
-    }
-    const hasUntracked =
-      (await this.git("ls-files", "--others", "--exclude-standard")).length > 0;
-    if (hasUntracked) {
-      dirtyChars.push("%");
-    }
+    return dirty.join("");
+  }
 
+  private async midFlow(): Promise<string> {
     const repoPath = await this.repoPath();
     const isDir = (...names: string[]) => this.isDir(join(repoPath, ...names));
     const isFile = (...names: string[]) =>
       this.isFile(join(repoPath, ...names));
-    const midFlow = (await isDir("rebase-merge"))
-      ? (await isFile("rebase-merge", "interactive")) ? "|REBASE-i" : "REBASE-m"
-      : (await isDir("rebase-apply"))
-      ? (await isFile("rebase-apply", "rebasing"))
-        ? "|REBASE"
-        : (await isFile("rebase-apply", "applying"))
-        ? "|AM"
-        : "|AM/REBASE"
-      : (await isFile("MERGE_HEAD"))
-      ? "|MERGING"
-      : (await isFile("CHERRY_PICK_HEAD"))
-      ? "|CHERRY-PICKING"
-      : (await isFile("REVERT_HEAD"))
-      ? "|REVERTING"
-      : (await isFile("BISECT_LOG"))
-      ? "|BISECTING"
-      : "";
-
-    return [dirtyChars.join(""), midFlow].join(" ");
+    if (await isDir("rebase-merge")) {
+      if (await isFile("rebase-merge", "interactive")) {
+        return "|REBASE-i";
+      } else {
+        return "|REBASE-m";
+      }
+    } else if (await isDir("rebase-apply")) {
+      if (await isFile("rebase-apply", "rebasing")) {
+        return "|REBASE";
+      } else if (await isFile("rebase-apply", "applying")) {
+        return "|AM";
+      } else {
+        return "|AM/REBASE";
+      }
+    } else if (await isFile("MERGE_HEAD")) {
+      return "|MERGING";
+    } else if (await isFile("CHERRY_PICK_HEAD")) {
+      return "|CHERRY-PICKING";
+    } else if (await isFile("REVERT_HEAD")) {
+      return "|REVERTING";
+    } else if (await isFile("BISECT_LOG")) {
+      return "|BISECTING";
+    }
+    return "";
   }
 
   private async refs(): Promise<Map<string, string[]>> {
