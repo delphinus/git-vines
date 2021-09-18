@@ -3,6 +3,18 @@ import { readAll } from "https://deno.land/std@0.107.0/io/util.ts";
 import { BufReader, readLines } from "https://deno.land/std@0.107.0/io/mod.ts";
 import { exists } from "https://deno.land/std@0.107.0/fs/mod.ts";
 
+interface Commit {
+  author: string;
+  autoRefs: string;
+  hash: string;
+  miniSha: string;
+  msg: string;
+  nextSha: string[];
+  parents: string[];
+  sha: string;
+  time: string;
+}
+
 export class Process {
   private statCache = new Map<string, Deno.FileInfo | null>();
   private prettyFmt = "format:%H\t%at\t%an\t%C(reset)%C(auto)%d%C(reset)\t%s";
@@ -13,7 +25,7 @@ export class Process {
     console.log(await this.status());
 
     for await (
-      const { line, nextHashes } of this.getLineBlock(
+      const c of this.getLineBlock(
         this.gitOpen(
           "log",
           "--date-order",
@@ -29,20 +41,47 @@ export class Process {
   private async *getLineBlock(
     fh: Deno.Reader,
     max: number,
-  ): AsyncGenerator<{ line: string; nextHashes: string[] }> {
+  ): AsyncGenerator<Commit> {
     const reader = readLines(fh);
     const lines: string[] = [];
-    while (lines.length < max) {
-      const res = await reader.next();
-      if (res.done) {
+    while (true) {
+      while (lines.length < max) {
+        const res = await reader.next();
+        if (res.done) {
+          break;
+        }
+        lines.push(res.value);
+      }
+      const line = lines.shift();
+      if (!line) {
         break;
       }
-      lines.push(res.value);
+      const m = line.match(/^<(.*?)><(.*?)><(.*?)>(.*)/s);
+      if (!m) {
+        break;
+      }
+      const [_, sha, miniSha, allParents, allMsg] = m;
+      const [hash, timeStr, author, autoRefs, msg] = allMsg.split(/\t/, 5);
+      yield {
+        author,
+        autoRefs,
+        hash,
+        miniSha,
+        msg,
+        nextSha: lines.slice(0, max - 2).map((line) =>
+          line.replace(/^<(.*?)>/, RegExp.$1)
+        ),
+        parents: allParents.split(" "),
+        sha,
+        time: this.formatTime(parseInt(timeStr, 10)),
+      };
     }
-    const line = lines.shift();
-    if (line) {
-      yield { line, nextHashes: lines.slice(0, max - 2) };
-    }
+  }
+
+  private formatTime(time: number) {
+    const d = new Date(time);
+    return `${d.getFullYear()}-${d.getMonth() +
+      1}-${d.getDate()} ${d.getHours()}:${d.getMinutes()}`;
   }
 
   private async status(): Promise<string> {
