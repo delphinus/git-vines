@@ -1,6 +1,6 @@
 import { join, normalize } from "https://deno.land/std@0.107.0/path/mod.ts";
 import { readAll } from "https://deno.land/std@0.107.0/io/util.ts";
-import { readLines } from "https://deno.land/std@0.107.0/io/mod.ts";
+import { BufReader, readLines } from "https://deno.land/std@0.107.0/io/mod.ts";
 import { exists } from "https://deno.land/std@0.107.0/fs/mod.ts";
 
 export class Process {
@@ -13,7 +13,7 @@ export class Process {
     console.log(await this.status());
 
     for await (
-      const line of this.getLineBlock(
+      const { line, nextHashes } of this.getLineBlock(
         this.gitOpen(
           "log",
           "--date-order",
@@ -29,10 +29,19 @@ export class Process {
   private async *getLineBlock(
     fh: Deno.Reader,
     max: number,
-  ): AsyncGenerator<string> {
-    for await (const line of readLines(fh)) {
-      console.log(max);
-      yield line;
+  ): AsyncGenerator<{ line: string; nextHashes: string[] }> {
+    const reader = readLines(fh);
+    const lines: string[] = [];
+    while (lines.length < max) {
+      const res = await reader.next();
+      if (res.done) {
+        break;
+      }
+      lines.push(res.value);
+    }
+    const line = lines.shift();
+    if (line) {
+      yield { line, nextHashes: lines.slice(0, max - 2) };
     }
   }
 
