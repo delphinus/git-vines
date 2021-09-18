@@ -59,12 +59,13 @@ export class Process {
         c.time,
         "",
       );
-      //
+      // TODO
       const ref = refs.get(c.sha);
       if (ref) {
-        //
+        // TODO
         let modified = c.autoRefs;
         if (ref.some((r) => /^refs\/tags\//.test(r))) {
+          // TODO
           modified = modified.replace(
             /\x1b\[\d;\d\dm(tag: \S+)/g,
             Color.tag("$1"),
@@ -74,7 +75,7 @@ export class Process {
       } else {
         printf("%s %s\n", c.autoRefs, c.msg);
       }
-      //
+      // TODO
     }
   }
 
