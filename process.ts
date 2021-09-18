@@ -26,23 +26,28 @@ const Color = {
   tag: (v: string) => colors.bold(colors.magenta(v)),
 };
 
+interface Stat {
+  refs: Map<string, string[]>;
+  hashWidth: number;
+}
+
 export class Process {
   private statCache = new Map<string, Deno.FileInfo | null>();
   private prettyFmt = "%H\t%at\t%an\t%C(reset)%C(auto)%d%C(reset)\t%s";
   private subVineDepth = 2;
 
   async run(): Promise<void> {
-    // console.log(await this.refs());
     // console.log(await this.status());
 
     const vines: string[] = [];
-    const hashWidth = (await this.git("rev-parse", "--short", "HEAD")).length;
+    const { refs, hashWidth } = await this.stat();
     for await (
       const c of this.getLineBlock(
         this.gitOpen(
           "log",
           "--date-order",
           `--pretty=format:<%H><%h><%P>${this.prettyFmt}`,
+          "--color",
         ),
         this.subVineDepth,
       )
@@ -54,11 +59,42 @@ export class Process {
         c.time,
         "",
       );
+      //
+      const ref = refs.get(c.sha);
+      if (ref) {
+        //
+        let modified = c.autoRefs;
+        if (ref.some((r) => /^refs\/tags\//.test(r))) {
+          modified = modified.replace(
+            /\x1b\[\d;\d\dm(tag: \S+)/g,
+            Color.tag("$1"),
+          );
+        }
+        printf("%s %s\n", modified, c.msg);
+      } else {
+        printf("%s %s\n", c.autoRefs, c.msg);
+      }
+      //
     }
   }
 
   private vineBranch(vines: string[], sha: string) {
     //
+  }
+
+  private async stat(): Promise<Stat> {
+    let refs: Map<string, string[]> | undefined = undefined;
+    let hashWidth: number | undefined = undefined;
+    await Promise.all([
+      this.refs().then((v) => refs = v),
+      this.git("rev-parse", "--short", "HEAD").then((v) =>
+        hashWidth = v.length
+      ),
+    ]);
+    if (typeof (refs) === "undefined" || typeof (hashWidth) === "undefined") {
+      throw new Error("Promise not finished");
+    }
+    return { refs, hashWidth };
   }
 
   private async *getLineBlock(
