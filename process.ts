@@ -1,7 +1,9 @@
 import { join, normalize } from "https://deno.land/std@0.107.0/path/mod.ts";
 import { readAll } from "https://deno.land/std@0.107.0/io/util.ts";
-import { BufReader, readLines } from "https://deno.land/std@0.107.0/io/mod.ts";
+import { readLines } from "https://deno.land/std@0.107.0/io/mod.ts";
 import { exists } from "https://deno.land/std@0.107.0/fs/mod.ts";
+import * as colors from "https://deno.land/std@0.107.0/fmt/colors.ts";
+import { printf } from "https://deno.land/std@0.107.0/fmt/printf.ts";
 
 interface Commit {
   author: string;
@@ -15,15 +17,26 @@ interface Commit {
   time: string;
 }
 
+const Color = {
+  default: colors.white,
+  tree: colors.cyan,
+  hash: colors.magenta,
+  date: colors.blue,
+  author: colors.yellow,
+  tag: (v: string) => colors.bold(colors.magenta(v)),
+};
+
 export class Process {
   private statCache = new Map<string, Deno.FileInfo | null>();
-  private prettyFmt = "format:%H\t%at\t%an\t%C(reset)%C(auto)%d%C(reset)\t%s";
+  private prettyFmt = "%H\t%at\t%an\t%C(reset)%C(auto)%d%C(reset)\t%s";
   private subVineDepth = 2;
 
   async run(): Promise<void> {
-    console.log(await this.refs());
-    console.log(await this.status());
+    // console.log(await this.refs());
+    // console.log(await this.status());
 
+    const vines: string[] = [];
+    const hashWidth = (await this.git("rev-parse", "--short", "HEAD")).length;
     for await (
       const c of this.getLineBlock(
         this.gitOpen(
@@ -34,8 +47,18 @@ export class Process {
         this.subVineDepth,
       )
     ) {
-      //
+      this.vineBranch(vines, c.sha);
+      printf(
+        Color.hash(`%-${hashWidth}.${hashWidth}s `) + Color.date("%-16s%2s"),
+        c.hash,
+        c.time,
+        "",
+      );
     }
+  }
+
+  private vineBranch(vines: string[], sha: string) {
+    //
   }
 
   private async *getLineBlock(
@@ -73,7 +96,7 @@ export class Process {
         ),
         parents: allParents.split(" "),
         sha,
-        time: this.formatTime(parseInt(timeStr, 10)),
+        time: this.formatTime(parseInt(timeStr, 10) * 1000),
       };
     }
   }
