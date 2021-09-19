@@ -59,6 +59,7 @@ export class Process {
         c.time,
         "",
       );
+      const ra = this.vineCommit(vines, c.sha, c.parents);
       // TODO
       const ref = refs.get(c.sha);
       if (ref) {
@@ -79,8 +80,41 @@ export class Process {
     }
   }
 
+  /**
+   * Draws the branching vine matrix between a commit K and K^ (@rev).
+   *
+   * @param {string[]} vines - column array containing the expected parent IDs
+   * @param {string} sha - commit ID
+   */
   private vineBranch(vines: string[], sha: string) {
     //
+  }
+
+  private vineCommit(vines: string[], sha: string, parents: string[]) {
+  }
+
+  /** *
+   * A: branch to right (TODO: left?)
+   * B: branch to right
+   * C: commit
+   * M: merge commit
+   * D: (TODO: ?)
+   * e: merge visual left (╔)
+   * f: merge visual center (╦)
+   * g: merge visual right (╗)
+   * I: straight line (║)
+   * K: branch visual split (╬)
+   * m: single line (─)
+   * O: overpass (≡)
+   * r: root (╙)
+   * t: tip (╓)
+   * x: branch visual left (╚)
+   * y: branch visual center (╩)
+   * z: branch visual right (╝)
+   * *: filler
+   */
+  private visXfrm(source: string, spc?: string): void {
+    // TODO: Is spc is needed?
   }
 
   private async stat(): Promise<Stat> {
