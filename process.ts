@@ -4,6 +4,8 @@ import { readLines } from "https://deno.land/std@0.107.0/io/mod.ts";
 import { exists } from "https://deno.land/std@0.107.0/fs/mod.ts";
 import * as colors from "https://deno.land/std@0.107.0/fmt/colors.ts";
 import { printf } from "https://deno.land/std@0.107.0/fmt/printf.ts";
+import { Options } from "./main.ts";
+import { MutexMap } from "./mutex_map.ts";
 
 interface Commit {
   author: string;
@@ -27,20 +29,22 @@ const Color = {
 };
 
 interface Stat {
-  refs: Map<string, string[]>;
+  refs: MutexMap<string, string[]>;
   hashWidth: number;
+  status?: string;
 }
 
 export class Process {
-  private statCache = new Map<string, Deno.FileInfo | null>();
+  private _repoPath: string | undefined = undefined;
+  private statCache = new MutexMap<string, Deno.FileInfo | null>();
   private prettyFmt = "%H\t%at\t%an\t%C(reset)%C(auto)%d%C(reset)\t%s";
   private subVineDepth = 2;
 
-  async run(): Promise<void> {
-    // console.log(await this.status());
+  constructor(private opts: Options) {}
 
+  async run(): Promise<void> {
     const vines: string[] = [];
-    const { refs, hashWidth } = await this.stat();
+    const { refs, hashWidth, status } = await this.stat();
     for await (
       const c of this.getLineBlock(
         this.gitOpen(
@@ -61,10 +65,12 @@ export class Process {
       );
       const ra = this.vineCommit(vines, c.sha, c.parents);
       // TODO
-      const ref = refs.get(c.sha);
+      const ref = await refs.get(c.sha);
       if (ref) {
-        // TODO
         let modified = c.autoRefs;
+        if (status && ref.some((r) => r === "HEAD")) {
+          modified = modified.replace(/(?<=[^\/]HEAD)/, status);
+        }
         if (ref.some((r) => /^refs\/tags\//.test(r))) {
           // TODO
           modified = modified.replace(
@@ -118,18 +124,14 @@ export class Process {
   }
 
   private async stat(): Promise<Stat> {
-    let refs: Map<string, string[]> | undefined = undefined;
-    let hashWidth: number | undefined = undefined;
-    await Promise.all([
-      this.refs().then((v) => refs = v),
-      this.git("rev-parse", "--short", "HEAD").then((v) =>
-        hashWidth = v.length
+    const [refs, hashWidth, status] = await Promise.all([
+      this.refs(),
+      this.git("rev-parse", "--short", "HEAD").then((v) => v.length),
+      new Promise<string | undefined>((resolve) =>
+        resolve(this.opts.status ? this.status() : undefined)
       ),
     ]);
-    if (typeof (refs) === "undefined" || typeof (hashWidth) === "undefined") {
-      throw new Error("Promise not finished");
-    }
-    return { refs, hashWidth };
+    return { refs, hashWidth, status };
   }
 
   private async *getLineBlock(
@@ -235,40 +237,78 @@ export class Process {
     return "";
   }
 
-  private async refs(): Promise<Map<string, string[]>> {
-    const refs = new Map<string, string[]>();
+  private async refs(): Promise<MutexMap<string, string[]>> {
+    const refs = new MutexMap<string, string[]>();
+    await Promise.all([this.refsAll(refs), this.refsHead(refs)]);
+    return refs;
+  }
+
+  private async refsAll(refs: MutexMap<string, string[]>): Promise<void> {
+    const setTags: Promise<void>[] = [];
     for await (const line of readLines(this.gitOpen("show-ref"))) {
       const m = line.match(/^(\S+)\s+(.*)$/);
       if (!m) {
         continue;
       }
       const [_, sha, name] = m;
-      const names = refs.get(sha) || [];
+      const names = await refs.get(sha) || [];
       names.push(name);
-      refs.set(sha, names);
+      await refs.set(sha, names);
       if (/^refs\/tags\//.test(name)) {
-        const subSha = await this.git(
-          "log",
-          "-1",
-          "--pretty=format:%H",
-          name,
+        setTags.push(
+          this.git(
+            "log",
+            "-1",
+            "--pretty=format:%H",
+            name,
+          ).then((subSha) =>
+            refs.get(subSha).then((names) => ({ subSha, names }))
+          )
+            .then(
+              ({ subSha, names }) => {
+                const subNames = names || [];
+                subNames.push(name);
+                return refs.set(subSha, subNames);
+              },
+            ),
         );
-        const subNames = refs.get(subSha) || [];
-        subNames.push(name);
-        refs.set(subSha, subNames);
       }
     }
-    return refs;
+    await Promise.all(setTags);
+  }
+
+  private async refsHead(refs: MutexMap<string, string[]>): Promise<void> {
+    const showRebase = true; // TODO
+    let hasRebase = false;
+    if (showRebase) {
+      const repoPath = await this.repoPath();
+      if (
+        await this.isFile(join(repoPath, "rebase-merge", "git-rebase-todo"))
+      ) {
+        hasRebase = true;
+        // TODO
+      }
+    }
+    const head = await this.git("rev-parse", "HEAD");
+    const v = await refs.get(head) || [];
+    if (hasRebase) {
+      v.unshift("rebase/new");
+    }
+    v.unshift("HEAD");
+    return refs.set(head, v);
   }
 
   private async repoPath(): Promise<string> {
+    if (this._repoPath) {
+      return this._repoPath;
+    }
     const top = await this.git("rev-parse", "--show-toplevel");
     const dotGit = join(top, ".git");
     if (!(await exists(dotGit))) {
       throw new Error(`.git not found: ${dotGit}`);
     }
     if (await this.isDir(dotGit)) {
-      return dotGit;
+      return this._repoPath = dotGit;
     } else if (await this.isFile(dotGit)) {
       const fh = await Deno.open(dotGit);
       const line = new TextDecoder().decode(await readAll(fh));
@@ -276,7 +316,7 @@ export class Process {
       if (!m) {
         throw new Error(`invalid .git file: ${dotGit}`);
       }
-      return normalize(join(dotGit, m[1]));
+      return this._repoPath = normalize(join(dotGit, m[1]));
     }
     throw new Error("cannot detect repo_path");
   }
@@ -292,7 +332,7 @@ export class Process {
   }
 
   private async isDir(name: string): Promise<boolean> {
-    const cached = this.statCache.get(name);
+    const cached = await this.statCache.get(name);
     if (cached) {
       return cached.isDirectory;
     }
@@ -302,7 +342,7 @@ export class Process {
   }
 
   private async isFile(name: string): Promise<boolean> {
-    const cached = this.statCache.get(name);
+    const cached = await this.statCache.get(name);
     if (cached) {
       return cached.isFile;
     }
