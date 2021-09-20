@@ -58,13 +58,14 @@ export class Process {
   private subVineDepth = 2;
   private gitConcurrency = 7;
   private git: Git;
+  private vines = new Map<number, string>();
+  private graphMarginLeft = 2;
 
   constructor(private opts: Options) {
     this.git = new Git(this.gitConcurrency);
   }
 
   async run(): Promise<void> {
-    const vines: string[] = [];
     const { refs, hashWidth, status } = await this.stat();
     const p = await this.git.open(
       "log",
@@ -73,14 +74,15 @@ export class Process {
       "--color",
     );
     for await (const c of this.getLineBlock(p, this.subVineDepth)) {
-      this.vineBranch(vines, c.sha);
+      // TODO: dateWidth
+      this.vineBranch(c.sha, hashWidth, 16);
       printf(
         Color.hash(`%-${hashWidth}.${hashWidth}s `) + Color.date("%-16s%2s"),
         c.hash,
         c.time,
         "",
       );
-      const ra = this.vineCommit(vines, c.sha, c.parents);
+      const ra = this.vineCommit(c.sha, c.parents);
       // TODO
       const ref = await refs.get(c.sha);
       if (ref) {
@@ -109,11 +111,43 @@ export class Process {
    * @param {string[]} vines - column array containing the expected parent IDs
    * @param {string} sha - commit ID
    */
-  private vineBranch(vines: string[], sha: string) {
-    //
+  private vineBranch(sha: string, hashWidth: number, dateWidth: number): void {
+    if (this.vines.size === 0) {
+      return;
+    }
+    const max = Math.max(...this.vines.keys());
+    const parts: string[] = [];
+    let masterFound = false;
+    let matched = 0;
+    for (const i of Array.from(new Array(max + 1).keys())) {
+      if (!this.vines.has(i)) {
+        parts[i] = " ";
+      } else if (this.vines.get(i) !== sha) {
+        parts[i] = "I";
+      } else {
+        matched++;
+        if (!masterFound && i % 2 === 0) {
+          parts[i] = "S";
+          masterFound = true;
+        } else {
+          parts[i] = "s";
+          this.vines.delete(i);
+        }
+      }
+    }
+
+    if (matched >= 2) {
+      printf(
+        `%-${hashWidth}.${hashWidth}s %-${dateWidth}s%${this.graphMarginLeft}s`,
+        "",
+        "",
+        "",
+      );
+      // TODO: this.visPost(this.visFan(parts, 'branch'))
+    }
   }
 
-  private vineCommit(vines: string[], sha: string, parents: string[]) {
+  private vineCommit(sha: string, parents: string[]) {
   }
 
   /** *
