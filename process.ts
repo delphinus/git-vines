@@ -6,6 +6,7 @@ import * as colors from "https://deno.land/std@0.107.0/fmt/colors.ts";
 import { printf } from "https://deno.land/std@0.107.0/fmt/printf.ts";
 import { Options } from "./main.ts";
 import { MutexMap } from "./mutex_map.ts";
+import { Git } from "./git.ts";
 
 interface Commit {
   author: string;
@@ -39,23 +40,23 @@ export class Process {
   private statCache = new MutexMap<string, Deno.FileInfo | null>();
   private prettyFmt = "%H\t%at\t%an\t%C(reset)%C(auto)%d%C(reset)\t%s";
   private subVineDepth = 2;
+  private gitConcurrency = 7;
+  private git: Git;
 
-  constructor(private opts: Options) {}
+  constructor(private opts: Options) {
+    this.git = new Git(this.gitConcurrency);
+  }
 
   async run(): Promise<void> {
     const vines: string[] = [];
     const { refs, hashWidth, status } = await this.stat();
-    for await (
-      const c of this.getLineBlock(
-        this.gitOpen(
-          "log",
-          "--date-order",
-          `--pretty=format:<%H><%h><%P>${this.prettyFmt}`,
-          "--color",
-        ),
-        this.subVineDepth,
-      )
-    ) {
+    const p = await this.git.open(
+      "log",
+      "--date-order",
+      `--pretty=format:<%H><%h><%P>${this.prettyFmt}`,
+      "--color",
+    );
+    for await (const c of this.getLineBlock(p, this.subVineDepth)) {
       this.vineBranch(vines, c.sha);
       printf(
         Color.hash(`%-${hashWidth}.${hashWidth}s `) + Color.date("%-16s%2s"),
@@ -126,7 +127,7 @@ export class Process {
   private async stat(): Promise<Stat> {
     const [refs, hashWidth, status] = await Promise.all([
       this.refs(),
-      this.git("rev-parse", "--short", "HEAD").then((v) => v.length),
+      this.git.run("rev-parse", "--short", "HEAD").then((v) => v.length),
       new Promise<string | undefined>((resolve) =>
         resolve(this.opts.status ? this.status() : undefined)
       ),
@@ -199,7 +200,9 @@ export class Process {
         { cmd: ["stash", "list"], char: "$" },
         // hasUntracked
         { cmd: ["ls-files", "--others", "--exclude-standard"], char: "%" },
-      ].map((c) => this.git(...c.cmd).then((v) => v.length > 0 ? c.char : ""))
+      ].map((c) =>
+        this.git.run(...c.cmd).then((v) => v.length > 0 ? c.char : "")
+      )
     ) {
       dirty.push(result);
     }
@@ -245,7 +248,8 @@ export class Process {
 
   private async refsAll(refs: MutexMap<string, string[]>): Promise<void> {
     const setTags: Promise<void>[] = [];
-    for await (const line of readLines(this.gitOpen("show-ref"))) {
+    const p = await this.git.open("show-ref");
+    for await (const line of readLines(p)) {
       const m = line.match(/^(\S+)\s+(.*)$/);
       if (!m) {
         continue;
@@ -256,7 +260,7 @@ export class Process {
       await refs.set(sha, names);
       if (/^refs\/tags\//.test(name)) {
         setTags.push(
-          this.git(
+          this.git.run(
             "log",
             "-1",
             "--pretty=format:%H",
@@ -289,7 +293,7 @@ export class Process {
         // TODO
       }
     }
-    const head = await this.git("rev-parse", "HEAD");
+    const head = await this.git.run("rev-parse", "HEAD");
     const v = await refs.get(head) || [];
     if (hasRebase) {
       v.unshift("rebase/new");
@@ -302,7 +306,7 @@ export class Process {
     if (this._repoPath) {
       return this._repoPath;
     }
-    const top = await this.git("rev-parse", "--show-toplevel");
+    const top = await this.git.run("rev-parse", "--show-toplevel");
     const dotGit = join(top, ".git");
     if (!(await exists(dotGit))) {
       throw new Error(`.git not found: ${dotGit}`);
@@ -319,16 +323,6 @@ export class Process {
       return this._repoPath = normalize(join(dotGit, m[1]));
     }
     throw new Error("cannot detect repo_path");
-  }
-
-  private async git(...args: string[]): Promise<string> {
-    const output = await readAll(this.gitOpen(...args));
-    const out = new TextDecoder().decode(output);
-    return out.replace(/\n$/, "");
-  }
-
-  private gitOpen(...args: string[]): Deno.Reader & Deno.Closer {
-    return Deno.run({ cmd: ["git", ...args], stdout: "piped" }).stdout;
   }
 
   private async isDir(name: string): Promise<boolean> {
