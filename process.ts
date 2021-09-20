@@ -2,11 +2,20 @@ import { join, normalize } from "https://deno.land/std@0.107.0/path/mod.ts";
 import { readAll } from "https://deno.land/std@0.107.0/io/util.ts";
 import { readLines } from "https://deno.land/std@0.107.0/io/mod.ts";
 import { exists } from "https://deno.land/std@0.107.0/fs/mod.ts";
-import * as colors from "https://deno.land/std@0.107.0/fmt/colors.ts";
+import {
+  blue,
+  bold,
+  cyan,
+  green,
+  magenta,
+  white,
+  yellow,
+} from "https://deno.land/std@0.107.0/fmt/colors.ts";
 import { printf } from "https://deno.land/std@0.107.0/fmt/printf.ts";
 import { Options } from "./main.ts";
 import { MutexMap } from "./mutex_map.ts";
 import { Git } from "./git.ts";
+import { compose } from "https://deno.land/x/compose@1.3.2/index.js";
 
 interface Commit {
   author: string;
@@ -21,12 +30,19 @@ interface Commit {
 }
 
 const Color = {
-  default: colors.white,
-  tree: colors.cyan,
-  hash: colors.magenta,
-  date: colors.blue,
-  author: colors.yellow,
-  tag: (v: string) => colors.bold(colors.magenta(v)),
+  default: white,
+  tree: cyan,
+  hash: magenta,
+  date: blue,
+  author: yellow,
+  tag: compose(bold, magenta),
+  branchColors: [
+    compose(bold, blue),
+    compose(bold, yellow),
+    compose(bold, magenta),
+    compose(bold, green),
+    compose(bold, cyan),
+  ],
 };
 
 interface Stat {
